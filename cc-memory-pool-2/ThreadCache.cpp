@@ -28,7 +28,7 @@ void cc_memory_pool::ThreadCache::deallocate(void* obj, size_t bytes)
 	// 将内存对象插入free链表 
 	freeList.push(obj);
 
-	if (freeList.size() >= freeList.maxFetchNum()) 
+	if (freeList.size() >= freeList.batchSize()) 
 	{
 		// 如果free链表中的obj太多，归还一部分给下层
 		CentralCache::getInstance()->releaseObjToCentralCache(freeList, bytes);
@@ -51,10 +51,11 @@ void cc_memory_pool::ThreadCache::fetchObjFromCentralCache(size_t bytes, FreeLis
 	size_t threshold = SizeClass::numFetchObj(bytes);
 	// 慢开始算法
 	size_t fetchNum = 0;
-	if (freeList.maxFetchNum() < threshold)
+	// 从freeList批量获取内存对象
+	if (freeList.batchSize() < threshold)
 	{
-		fetchNum = freeList.maxFetchNum();
-		freeList.maxFetchNum()++;
+		fetchNum = freeList.batchSize();
+		freeList.batchSize()++;
 	}
 	else
 	{

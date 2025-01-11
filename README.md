@@ -16,10 +16,10 @@
    
    - 我们需要管理不同大小的内存块，就不能在同一个free链表中，如果这样做，无法判断取出的内存块是多大
    - 所以，要使用多个free链表，每个链表管理一个指定大小的内存块
-    
+   
 2. **这时候问题是：要用多少个链表，难道每一个大小都搞一个链表？**
    
-    > 假设最多可以申请256KB空间，那么就要从1b到256*1024b，每一个大小都映射一个free链表，这样算下来一共262144个，这个数字是很恐怖的，维护链表的成本极大。
+    > 假设最多可以申请256KB空间，那么就要从1b到256*1024b，每一个大小都映射一个free链表，这样算下来一共262144个，这个数字是很吓人的，维护链表的成本极大。
 
     `tcmalloc`采用的是空间对齐（Align）的策略，假设对齐数为8b字节，你申请小于8字节的空间，就给你8字节，你申请小于16字节 (>8) 的空间，就给你16字节，以此类推，每次向上调整到8的整数倍。
     
@@ -29,7 +29,9 @@
     
     - 内碎片问题需要控制，只要浪费的不多，都是值得的。
     
-   使用哈希桶组织起来。
+   
+   
+   **每个对齐字节数，对应一个自由链表freeList，使用哈希桶组织起来。**
 
 ![enter image description here](https://ckfs.oss-cn-beijing.aliyuncs.com/img/202412081716235.png)
 
@@ -93,11 +95,14 @@ void cc_memory_pool::ThreadCache::fetchObjFromCentralCache(size_t bytes, FreeLis
 	size_t threshold = SizeClass::numFetchObj(bytes);
 	// 慢开始算法
 	size_t fetchNum = 0;
-    // 每个freeList有一个最大获取个数，每次获取自增1，到达阈值为止
-	if (freeList.maxFetchNum() < threshold)
+    /* 
+    	batchSize是freeList的批量获取个数
+    	（即一次从该CentralCache中批量获取的obj个数，每次获取后，其值加1，到达阈值停止）
+    */
+	if (freeList.batchSize() < threshold)
 	{
-		fetchNum = freeList.maxFetchNum();
-		freeList.maxFetchNum()++;
+		fetchNum = freeList.batchSize();
+		freeList.batchSize()++;
 	}
 	else
 	{
@@ -120,20 +125,76 @@ void cc_memory_pool::ThreadCache::fetchObjFromCentralCache(size_t bytes, FreeLis
 
 **释放逻辑**
 
-用户调用`ThreadCache::deallocate(void* obj, size_t bytes)`归还内存对象到`ThreadCache`中对应的自由链表。若归还后自由链表中的内存对象个数过多，则继续向下一层`CentralCache`释放空间。
+用户调用`ThreadCache::deallocate(void* obj, size_t bytes)`归还内存对象到`ThreadCache`中对应的自由链表。若归还后自由链表中的**内存对象个数达到一定数量**，则继续向下一层`CentralCache`释放空间。
 
 
+
+- `ThreadCache`为什么要定期向下层的`CentralCache`释放空间？
+
+  每个线程的`ThreadCache`是独立的，如果一个`ThreadCache`占用了太多的内存对象而不使用，其它线程就要花费更多成本去申请空间，这是不可取的。
+
+  
+
+- `ThreadCache`的自由链表中，内存对象`obj`个数达到多少时，向下层释放，比较合适？释放多少个内存对象合适？
+
+  > 内存对象释放太多，用户不够用又得去下层申请；释放太少，空间闲置率太高，其它线程想用还用不了。
+
+  这里规定 `ThreadCache`某个自由链表中的内存对象个数 >= 该自由链表的`batchSize` 时，向`CentralCache`释放一个批量的内存对象（即`batchSize`个`obj`）。
+
+  `batchSize`可以理解为`freeList`最近一次从下层申请的内存对象个数（实际相差一个，因为申请后`bacthSize++`）。最近一次从下层申请，肯定是因为上一次申请的内存对象被用户都拿光了，用户正在使用中，尚未归还。此时**用户正在使用的内存对象和相应`freeList`中的内存对象总数大概是`batchSize * 2`**，当用户逐步释放内存，直到相应`freeList`中的内存对象个数等于`batchSize`时，表示为用户准备的内存对象有一半不被使用，此时就向下层归还这一半，这样将每个`ThreadCache`的空间闲置率控制在大概50%。
+
+```cpp
+void cc_memory_pool::ThreadCache::deallocate(void* obj, size_t bytes)
+{
+	assert(obj != nullptr);
+	assert(bytes > 0);
+
+	// 根据对齐策略，选择对应的free链表
+	size_t idx = SizeClass::index(bytes);
+	FreeList& freeList = _freeLists[idx];
+
+	// 将内存对象插入free链表 
+	freeList.push(obj);
+
+	if (freeList.size() >= freeList.batchSize()) 
+	{
+		// 如果free链表中的obj太多，归还一部分给下层
+		CentralCache::getInstance()->releaseObjToCentralCache(freeList, bytes);
+	}
+}
+```
 
 
 
 ---
 
 
+
 ## CentralCache
 
-中央缓存
+> `CentralCache`也是一个哈希桶结构，其哈希桶的映射关系跟`ThreadCache`是一样的。不同的是其每个哈希桶位置挂是SpanList链表结构，SpanList管理一个一个的Span。
+
+**Span可以理解为一段连续的内存范围**，由CentralCache从下层PageCache申请而来。每个Span将大内存空间切分成一个一个的小内存对象（对象大小=Span所在哈希桶映射的字节大小），挂载在自己的自由链表中。
 
 ![](https://ckfs.oss-cn-beijing.aliyuncs.com/img/202412151549106.png)
+
+Span结构体定义如下：
+
+```cpp
+struct Span
+{
+    Span* _next = nullptr;
+    Span* _prev = nullptr;
+
+    PageID _pageID = 0; 	// 大块内存的起始页号
+    size_t _npage = 0;  	// 页数
+
+    int _useCount = 0;  	// 被使用的内存对象数
+    FreeList _freeList; 	// 挂载内存对象的free链表
+
+    bool _isUsing = false;	//是否正在被使用
+};
+```
 
 
 

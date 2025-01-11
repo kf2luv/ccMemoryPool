@@ -1,7 +1,7 @@
 #include "common.h"
 
 cc_memory_pool::FreeList::FreeList(void* head)
-	: _freeList(head), _maxFetchNum(1)
+	: _freeList(head), _batchSize(1)
 {
 }
 
@@ -62,9 +62,9 @@ size_t cc_memory_pool::FreeList::popRange(void*& begin, void*& end, size_t popNu
 }
 
 // 能从中央缓存获取的最大obj数量
-size_t& cc_memory_pool::FreeList::maxFetchNum()
+size_t& cc_memory_pool::FreeList::batchSize()
 {
-	return _maxFetchNum;
+	return _batchSize;
 }
 
 bool cc_memory_pool::FreeList::empty()

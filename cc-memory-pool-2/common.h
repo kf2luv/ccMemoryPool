@@ -92,7 +92,7 @@ namespace cc_memory_pool
 		void* pop();
 		size_t popRange(void*& begin, void*& end, size_t n);
 
-		size_t& maxFetchNum();
+		size_t& batchSize();
 		bool empty();
 
 		//获得自由链表的头指针
@@ -105,7 +105,13 @@ namespace cc_memory_pool
 	private:
 		void* _freeList = nullptr;
 		size_t _size = 0;		//free链表的节点个数
-		size_t _maxFetchNum = 0;//最大获取个数（即能从该free链表获取到的最大obj个数，每次从该链表获取时，增1，到达阈值停止）
+
+		/*
+			batchSize是freeList的批量获取个数
+			（即一次从该CentralCache中批量获取的obj个数，每次获取后，其值加1，到达阈值停止）
+			用于ThreadCache从CentralCache中获取obj
+		*/
+		size_t _batchSize = 0;
 	};
 
 	struct Span

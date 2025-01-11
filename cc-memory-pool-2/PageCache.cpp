@@ -64,7 +64,7 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 		}
 	}
 
-	// 走到这里代表Page Cache内不存在有效的span，需要向系统（堆）申请一个128page的空间（后续方便被拆分）
+	// 走到这里代表PageCache内不存在有效的span，需要向系统（堆）申请一个128page的空间（后续方便被拆分）
 	void* memory = systemAlloc(NPAGELISTS);//返回128page空间的起始地址
 	assert(memory);
 
@@ -106,7 +106,7 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 	bool canMergeNext = true;
 
 	//对于span的大块空间，尝试进行合并
-	//当前面和后面的相邻页都无法合并时（不存在、正在使用、合并后大于128KB），合并结束
+	//当 前面和后面 的相邻页都无法合并时（三种情况：不存在、正在使用、合并后大于128KB），合并结束
 	while (canMergePrev || canMergeNext)
 	{
 		if (canMergePrev)
@@ -118,6 +118,14 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 			Span* prevSpan = (prevIt != _idToSpanMap.end()) ? prevIt->second : nullptr;
 			if (prevSpan && !prevSpan->_isUsing && (span->_npage + prevSpan->_npage) <= NPAGELISTS)
 			{
+				/*
+				* 这里不能直接用_usecount==0来确定prevSpan已不被使用：
+				* 因为可能在另外一个线程A中，执行函数CentralCache::releaseObjToCentralCache，
+				* prevSpan的_usecount刚刚被减为0，还没有从对应的桶中解开，
+				* 这里先判断到_usecount==0，进行合并，然后执行下面的逻辑，最后prevSpan被delete掉，为野指针，
+				* 线程A后面再去对prevSpan指针做相应的操作，就会引发野指针问题
+				*/
+
 				//将prevSpan合并到span中
 				span->_pageID = prevSpan->_pageID;
 				span->_npage += prevSpan->_npage;

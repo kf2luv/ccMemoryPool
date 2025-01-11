@@ -13,7 +13,7 @@ namespace cc_memory_pool
 		// 根据指定的页数，创建一个新的span
 		Span* newSpan(size_t npage);
 
-		// 通过页号获取对应的Span
+		// 通过内存对象的地址，得到其所属的Span
 		Span* mapObjToSpan(void* obj);
 
 		// 将空闲的span归还给 Page Cache

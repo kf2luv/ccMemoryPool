@@ -86,45 +86,50 @@ size_t cc_memory_pool::CentralCache::getRangeObj(void*& begin, void*& end, size_
 
 void cc_memory_pool::CentralCache::releaseObjToCentralCache(FreeList& freeList, size_t bytes)
 {
-	//1.从free链表中取走一部分内存对象
+	//1.从free链表中取走一个批量的内存对象
 	size_t idx = SizeClass::index(bytes);
 	void* begin = nullptr;
 	void* end = nullptr;
-	size_t actualNum = freeList.popRange(begin, end, freeList.maxFetchNum());
+	size_t actualNum = freeList.popRange(begin, end, freeList.batchSize());
 
 	//2.遍历每一个内存对象obj，依次归还给Central Cache
-	void* obj = begin;
-	
+	void* curObj = begin;
+
 	//要对CentralCache的桶操作，加桶锁
-	std::unique_lock<std::mutex> bucketLock(_spanLists[idx].getMutex());
+	_spanLists[idx].getMutex().lock();
 
-	while (obj) {
-		void* nextObj = FreeList::nextObj(obj);
+	while (curObj)
+	{
+		void* nextObj = FreeList::nextObj(curObj);
 
-		// 1.找到内存对象obj对应的span
-		Span* span = PageCache::getInstance()->mapObjToSpan(obj);
+		// 1) 找到内存对象curObj所属的span
+		Span* span = PageCache::getInstance()->mapObjToSpan(curObj);
 
-		// 2.将obj归还给span
-		span->_freeList.push(obj);
+		// 2) 将curObj归还给span
+		span->_freeList.push(curObj);
 		span->_useCount--;
 
-		if (span->_useCount == 0) {
-			//合并, 从Central Cache中移除
+		if (span->_useCount == 0) 
+		{
+			//合并, 从CentralCache中移除
+			//(先从桶中解开Span，再设置_isUsing = false，防止引发野指针)
+			_spanLists[idx].erase(span);
 			span->_freeList = nullptr;
 			span->_isUsing = false;
-			_spanLists[idx].erase(span);
 
-			bucketLock.unlock();
+			_spanLists[idx].getMutex().unlock();
 			//归还给下一层（在此之前先解开桶锁，让其它线程可以访问这个桶）
 			{
 				//对页缓存进行操作，加整体锁
 				std::unique_lock<std::mutex> pageCacheLock(PageCache::getInstance()->getMutex());
 				PageCache::getInstance()->releaseSpanToPageCache(span);
 			}
-			bucketLock.lock();
+			_spanLists[idx].getMutex().lock();
 		}
 
 		// 3.查找下一个内存对象obj
-		obj = nextObj;
+		curObj = nextObj;
 	}
+
+	_spanLists[idx].getMutex().unlock();
 }
