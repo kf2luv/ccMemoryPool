@@ -1,8 +1,3 @@
-﻿  PageCache.cpp
+﻿  ThreadCache.cpp
 C:\Users\Ckf\source\repos\cc-memory-pool-2\cc-memory-pool-2\common.h(88,1): warning C4334: “<<”: 32 位移位的结果被隐式转换为 64 位(是否希望进行 64 位移位?)
-  test.cpp
-C:\Users\Ckf\source\repos\cc-memory-pool-2\cc-memory-pool-2\common.h(88,1): warning C4334: “<<”: 32 位移位的结果被隐式转换为 64 位(是否希望进行 64 位移位?)
-C:\Users\Ckf\source\repos\cc-memory-pool-2\cc-memory-pool-2\test.cpp(64,10): warning C4477: “printf”: 格式字符串“%lf”需要类型“double”的参数，但可变参数 2 拥有了类型“int”
-C:\Users\Ckf\source\repos\cc-memory-pool-2\cc-memory-pool-2\test.cpp(70,9): warning C4477: “printf”: 格式字符串“%lf”需要类型“double”的参数，但可变参数 2 拥有了类型“int”
-  正在生成代码...
   cc-memory-pool-2.vcxproj -> C:\Users\Ckf\source\repos\cc-memory-pool-2\x64\Debug\cc-memory-pool-2.exe
