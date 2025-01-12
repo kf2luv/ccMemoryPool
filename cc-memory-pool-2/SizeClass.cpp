@@ -2,7 +2,8 @@
 
 size_t cc_memory_pool::SizeClass::roundUp(size_t bytes)
 {
-    assert(bytes > 0 && bytes <= MAX_MEM_SIZE);
+    assert(bytes > 0);
+
     if (bytes <= 128)
     {
         return _roundUp(bytes, 8);
@@ -19,9 +20,14 @@ size_t cc_memory_pool::SizeClass::roundUp(size_t bytes)
     {
         return _roundUp(bytes, 1024);
     }
-    else
+    else if(bytes <= 256 * 1024)
     {
         return _roundUp(bytes, 8192);
+    }
+    else
+    {
+        //大于256KB，按页对齐
+        return _roundUp(bytes, 1 << PAGE_SHIFT);
     }
 }
 

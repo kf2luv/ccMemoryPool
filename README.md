@@ -29,8 +29,8 @@
     
     - 内碎片问题需要控制，只要浪费的不多，都是值得的。
     
-   
-   
+
+
    **每个对齐字节数，对应一个自由链表freeList，使用哈希桶组织起来。**
 
 ![enter image description here](https://ckfs.oss-cn-beijing.aliyuncs.com/img/202412081716235.png)
@@ -231,3 +231,138 @@ Hints:
    > 经过实测，Linux系统和Windows系统使用系统调用函数（mmap/VirtualAlloc）都是以页为单位开辟空间，返回的是某一页的起始空间。页的默认大小是`4096byte`。
 
 2. PageCache和CentralCache之间的加解锁逻辑
+
+
+
+
+
+## 优化
+
+
+
+### 大于256KB的内存
+
+> 内存池三层模型规定了用户一次能申请的最大内存空间为256KB。那用户申请更大空间时应该怎么办？分以下几种情况：
+
+
+
+假设用户申请空间大小为`size`，一个页大小为`4KB`
+
+1. ` 256KB < size <= 128 * 4KB`  -> ` 64 * 4KB < size <= 128 * 4KB`，即size大小在32页到128页之间。
+
+   这种情况下，不能获取`ThreadCache`和`CentralCache`这两个缓存中的内存对象（它们中的最大内存对象为256KB），但是可以通过`PageCache`申请，因为`PageCache`最大能容纳128页的空间。故有如下设计：
+
+   申请逻辑：
+
+   当` 256KB < size <= 128 * 4KB`时，先将`size`按页对齐（如：`64页+100B`对齐到`65页`），得到页数`kpage`，然后向`PageCache`申请一个`kpage`页的span，此时逻辑与三层模型的逻辑相同，只不过没有对页空间进行切割，而是将其视为一个内存对象。后面归还空间时，也会进行合并。
+
+   
+
+2. `size > 128 * 4KB`
+
+   此时`PageCache`也无法满足需求，只能向系统申请。申请和释放还是托管给`PageCache`：`PageCache`会向系统申请一块大小为`size`的空间，并用一个`Span`来管理，这个`Span`不会进入`PageCache`的哈希桶中，只做一下映射来方便后面的释放
+
+   
+
+   `ccAlloc()`和`ccFree()`的改进
+
+   ```cpp
+   void* ccAlloc(size_t size)
+   {
+       if (size > MAX_MEM_SIZE)
+       {
+           //将size按页对齐
+           size_t align = SizeClass::roundUp(size);
+           size_t kPage = align >> PAGE_SHIFT;
+           Span* kSpan = nullptr;
+           //向PageCache申请一个kpage页的span
+           {
+               std::unique_lock<std::mutex> pageCacheLock(PageCache::getInstance()->getMutex());
+               kSpan = PageCache::getInstance()->newSpan(kPage);
+           }
+           //将kSpan的页号转换为起始地址
+           void* addr = (void*)(kSpan->_pageID << PAGE_SHIFT);
+   
+           return addr;
+       }
+   
+       if (pTLSThreadCache == nullptr)
+       {
+           pTLSThreadCache = new ThreadCache;
+       }
+       return pTLSThreadCache->allocate(size);
+   }
+   
+   void ccFree(void* obj, size_t size)
+   {
+       if (size > MAX_MEM_SIZE)
+       {
+           //找到obj所属的span
+           Span* span = PageCache::getInstance()->mapObjToSpan(obj);
+           {
+               //对页缓存进行操作，加整体锁
+               std::unique_lock<std::mutex> pageCacheLock(PageCache::getInstance()->getMutex());
+               PageCache::getInstance()->releaseSpanToPageCache(span);
+           }
+       }
+       else 
+       {
+           pTLSThreadCache->deallocate(obj, size);
+       }
+   }
+   ```
+
+   `PageCache`中对应的实现逻辑
+
+   ```cpp
+   cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
+   {
+   	assert(k > 0);
+       
+   	//k大于128页
+   	if (k > NPAGELISTS)
+   	{
+   		//直接向系统申请k页空间
+   		void* addr = systemAlloc(k);
+   
+   		Span* kSpan = new Span;
+   		kSpan->_npage = k;
+   		kSpan->_pageID = (PageID)addr >> PAGE_SHIFT;
+   
+   		//映射，释放时才能找到
+   		_idToSpanMap[kSpan->_pageID] = kSpan;
+   
+   		return kSpan;
+   	}
+       
+   	//k小于等于128页
+       //...
+   }
+   
+   void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
+   {
+   	assert(span);
+       
+       //大于128页
+   	if (span->_npage > NPAGELISTS)
+   	{
+   		//直接还给系统
+   		void* addr = (void*)(span->_pageID << PAGE_SHIFT);
+   		systemDealloc(addr, span->_npage);
+   		//移除这个span
+   		_idToSpanMap.erase(span->_pageID);
+   		delete span;
+   		return;
+   	}
+       
+       //小于等于128页
+       //...
+   }
+   ```
+
+   
+
+
+
+
+

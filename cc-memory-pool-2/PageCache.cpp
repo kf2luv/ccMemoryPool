@@ -15,7 +15,22 @@ std::mutex& cc_memory_pool::PageCache::getMutex()
 // 从PageCache申请一个存有k页的span
 cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 {
-	assert(k > 0 && k <= NPAGELISTS);
+	assert(k > 0);
+	
+	if (k > NPAGELISTS)//k大于128页
+	{
+		//直接向系统申请k页空间
+		void* addr = systemAlloc(k);
+
+		Span* kSpan = new Span;
+		kSpan->_npage = k;
+		kSpan->_pageID = (PageID)addr >> PAGE_SHIFT;
+
+		//映射，释放时才能找到
+		_idToSpanMap[kSpan->_pageID] = kSpan;
+
+		return kSpan;
+	}
 
 	SpanList& spanList = _spanLists[k];
 
@@ -65,16 +80,14 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 	}
 
 	// 走到这里代表PageCache内不存在有效的span，需要向系统（堆）申请一个128page的空间（后续方便被拆分）
-	void* memory = systemAlloc(NPAGELISTS);//返回128page空间的起始地址
-	assert(memory);
+	void* addr = systemAlloc(NPAGELISTS);//返回128page空间的起始地址
+	assert(addr);
 
 	Span* bigSpan = new Span;
 	//修改span的空间，页数和页号
-	bigSpan->_freeList = FreeList(memory);
+	bigSpan->_freeList = FreeList(addr);
 	bigSpan->_npage = NPAGELISTS;
-
-	uintptr_t address = reinterpret_cast<uintptr_t>(memory);
-	bigSpan->_pageID = address >> PAGE_SHIFT;
+	bigSpan->_pageID = (PageID)addr >> PAGE_SHIFT;
 
 	_spanLists[NPAGELISTS].pushFront(bigSpan);
 	// 此时只是新增了大Span，还需要拆分后返回给用户，复用代码
@@ -89,10 +102,12 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::mapObjToSpan(void* obj)
 
 	// 2.通过映射，找到对应的Span
 	auto it = _idToSpanMap.find(pageID);
-	if (it != _idToSpanMap.end()) {
+	if (it != _idToSpanMap.end()) 
+	{
 		return it->second;
 	}
-	else {
+	else 
+	{
 		//不可能发生，申请的内存计算出来的pageID一定存在
 		assert(false);
 		return nullptr;
@@ -102,6 +117,19 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::mapObjToSpan(void* obj)
 
 void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 {
+	assert(span);
+
+	if (span->_npage > NPAGELISTS)//大于128页
+	{
+		//直接还给系统
+		void* addr = (void*)(span->_pageID << PAGE_SHIFT);
+		systemDealloc(addr, span->_npage);
+		//移除这个span
+		_idToSpanMap.erase(span->_pageID);
+		delete span;
+		return;
+	}
+
 	bool canMergePrev = true;
 	bool canMergeNext = true;
 

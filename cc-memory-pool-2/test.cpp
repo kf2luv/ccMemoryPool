@@ -166,8 +166,18 @@ void multiThreadTest() {
 	t2.join();
 }
 
+void bigAlloc() {
+	size_t bigSize1 = 256 * 1024 + 100;
+	void* ptr1 = cc_memory_pool::ccAlloc(bigSize1);
+	cc_memory_pool::ccFree(ptr1, bigSize1);
+
+	size_t bigSize2 = 129 * 4 * 1024;
+	void* ptr2 = cc_memory_pool::ccAlloc(bigSize2);
+	cc_memory_pool::ccFree(ptr2, bigSize2);
+}
+
 int main()
 {
-	multiThreadTest();
+	bigAlloc();
 	return 0;
 }

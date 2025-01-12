@@ -52,6 +52,15 @@ namespace cc_memory_pool
 		return ptr;
 	}
 
+	inline void systemDealloc(void* ptr, size_t pageSize)
+	{
+#if defined(_WIN32) || defined(_WIN64)
+		VirtualFree(ptr, 0, MEM_RELEASE);
+#else
+		munmap(ptr, pageSize);
+#endif
+	}
+
 	// 计算存取的大小等函数
 	class SizeClass
 	{
