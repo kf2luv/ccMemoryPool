@@ -102,9 +102,9 @@ void alloc_test4()
 	}
 
 
-	for (auto ptr : ptrs) {
-		cc_memory_pool::ccFree(ptr, sizeof(double));
-	}
+	//for (auto ptr : ptrs) {
+	//	cc_memory_pool::ccFree(ptr, sizeof(double));
+	//}
 }
 
 void alloc_test5()
@@ -117,13 +117,21 @@ void alloc_test5()
 	void* p6 = cc_memory_pool::ccAlloc(6);
 	void* p7 = cc_memory_pool::ccAlloc(7);
 
-	cc_memory_pool::ccFree(p1, 1);
-	cc_memory_pool::ccFree(p2, 2);
-	cc_memory_pool::ccFree(p3, 3);
-	cc_memory_pool::ccFree(p4, 4);
-	cc_memory_pool::ccFree(p5, 5);
-	cc_memory_pool::ccFree(p6, 6);
-	cc_memory_pool::ccFree(p7, 7);
+	//cc_memory_pool::ccFree(p1, 1);
+	//cc_memory_pool::ccFree(p2, 2);
+	//cc_memory_pool::ccFree(p3, 3);
+	//cc_memory_pool::ccFree(p4, 4);
+	//cc_memory_pool::ccFree(p5, 5);
+	//cc_memory_pool::ccFree(p6, 6);
+	//cc_memory_pool::ccFree(p7, 7);
+
+	cc_memory_pool::ccFree(p1);
+	cc_memory_pool::ccFree(p2);
+	cc_memory_pool::ccFree(p3);
+	cc_memory_pool::ccFree(p4);
+	cc_memory_pool::ccFree(p5);
+	cc_memory_pool::ccFree(p6);
+	cc_memory_pool::ccFree(p7);
 
 	//ø…≤‚ ‘“≥∫œ≤¢
 }
@@ -139,7 +147,7 @@ void multiThreadTest1() {
 	}
 
 	for (auto ptr : ptrs) {
-		cc_memory_pool::ccFree(ptr, 5);
+		cc_memory_pool::ccFree(ptr);
 	}
 }
 
@@ -153,7 +161,7 @@ void multiThreadTest2() {
 	}
 
 	for (auto ptr : ptrs) {
-		cc_memory_pool::ccFree(ptr, 5);
+		cc_memory_pool::ccFree(ptr);
 	}
 }
 
@@ -169,15 +177,16 @@ void multiThreadTest() {
 void bigAlloc() {
 	size_t bigSize1 = 256 * 1024 + 100;
 	void* ptr1 = cc_memory_pool::ccAlloc(bigSize1);
-	cc_memory_pool::ccFree(ptr1, bigSize1);
+	cc_memory_pool::ccFree(ptr1);
 
 	size_t bigSize2 = 129 * 4 * 1024;
 	void* ptr2 = cc_memory_pool::ccAlloc(bigSize2);
-	cc_memory_pool::ccFree(ptr2, bigSize2);
+	cc_memory_pool::ccFree(ptr2);
 }
 
 int main()
 {
+	//alloc_test5();
 	bigAlloc();
 	return 0;
 }

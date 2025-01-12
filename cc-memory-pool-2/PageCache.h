@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "ObjectPool.h"
 
 namespace cc_memory_pool
 {
@@ -24,12 +25,13 @@ namespace cc_memory_pool
 		PageCache(const PageCache& other) = delete;
 		PageCache& operator=(const PageCache& other) = delete;
 
-
 		SpanList _spanLists[NPAGELISTS + 1]; // 直接映射，下标i表示：链表中每个span维护i个page, 
 											 // PageCache里仅靠span的pageID和npage标识其维护的页空间.
 		std::mutex _mtx;                     // PageCache整体的锁
 		static PageCache _instance;
 
 		std::unordered_map<PageID, Span*> _idToSpanMap;//哈希表（页号 映射 页所在的span）
+
+		static ObjectPool<Span> spanPool;
 	};
 }

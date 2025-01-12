@@ -23,21 +23,21 @@ cc_memory_pool::Span* cc_memory_pool::CentralCache::getOneEffectiveSpan(SpanList
 
 	// 2.找不到有效span(spanList为空 or spanList中的span obj都不足)，就要去下层 Page Cache 申请一个新的span，供上层使用
 	size_t npage = SizeClass::numFetchPage(bytes);
-	Span* newSpan = nullptr;
+	Span* span = nullptr;
 
 	//(lock) 对页缓存进行操作，加整体锁，如果此时有多个线程找不到有效的span，那只会有一个线程去底层申请
 	//可能存在一个线程去底层申请完后，另一个线程再去申请，这种情况可以发生，一次不够多申请一点，后面申请的次数就少了
 	{
 		std::unique_lock<std::mutex> pageCacheLock(PageCache::getInstance()->getMutex());
-		newSpan = PageCache::getInstance()->newSpan(npage);
-		newSpan->_isUsing = true; //标记该span为正在使用，Page Cache不能将其合并
+		span = PageCache::getInstance()->newSpan(npage);
+		span->_isUsing = true; //标记该span为正在使用，Page Cache不能将其合并
 	}
-	//(unlock) 切割空间的逻辑不用加锁，因为newSpan是当前线程的私有对象
+	//(unlock) 切割空间的逻辑不用加锁，因为span是当前线程的私有对象
 
-	// 对newSpan分配到的大块内存进行切分，每一块的大小为size
+	// 3.对span分配到的大块内存进行切分，每一块的大小为size
 	size_t size = SizeClass::roundUp(bytes);
-	char* begin = (char*)(newSpan->_pageID << PAGE_SHIFT);
-	char* end = (char*)(begin + (newSpan->_npage << PAGE_SHIFT));
+	char* begin = (char*)(span->_pageID << PAGE_SHIFT);
+	char* end = (char*)(begin + (span->_npage << PAGE_SHIFT));
 	char* cur = begin;
 	while (cur + 2 * size <= end)
 	{
@@ -45,17 +45,18 @@ cc_memory_pool::Span* cc_memory_pool::CentralCache::getOneEffectiveSpan(SpanList
 		cur = (char*)FreeList::nextObj(cur);
 	}
 	FreeList::nextObj(cur) = nullptr;
-	// 将切分后的自由链表挂载到newSpan上!!!
-	newSpan->_freeList = FreeList(begin);
+	// 将切分后的自由链表挂载到span上!!!
+	span->_freeList = FreeList(begin);
+	// 标识该span的切出来的每一个内存对象的大小
+	span->_objSize = size;
 
-	// 此时newSpan的自由链表中已经包含充足的内存对象，将其插入spanList桶中
-
+	// 4.此时span的自由链表中已经包含充足的内存对象，将其插入spanList桶中
 	//(lock) 对中央缓存的某个spanList进行操作，先加桶锁
 	spanList.getMutex().lock();
-	spanList.pushFront(newSpan);
+	spanList.pushFront(span);
 
-	assert(newSpan);
-	return newSpan;
+	assert(span);
+	return span;
 }
 
 // begin和end：输出型参数，获取的内存对象（链表形式）的头结点为begin，尾节点为end
@@ -116,6 +117,7 @@ void cc_memory_pool::CentralCache::releaseObjToCentralCache(FreeList& freeList, 
 			_spanLists[idx].erase(span);
 			span->_freeList = nullptr;
 			span->_isUsing = false;
+			span->_objSize = 0;
 
 			_spanLists[idx].getMutex().unlock();
 			//归还给下一层（在此之前先解开桶锁，让其它线程可以访问这个桶）

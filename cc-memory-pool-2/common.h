@@ -52,6 +52,7 @@ namespace cc_memory_pool
 		return ptr;
 	}
 
+	//向系统释放内存
 	inline void systemDealloc(void* ptr, size_t pageSize)
 	{
 #if defined(_WIN32) || defined(_WIN64)
@@ -135,6 +136,8 @@ namespace cc_memory_pool
 		FreeList _freeList; // 存放内存对象的free链表
 
 		bool _isUsing = false;//是否正在被使用
+
+		size_t _objSize = 0; //该Span切割的内存对象大小
 	};
 	// 管理Span结构体的桶 (带头双向链表)
 	class SpanList

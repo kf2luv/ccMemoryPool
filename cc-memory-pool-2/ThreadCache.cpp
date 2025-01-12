@@ -19,7 +19,7 @@ void* cc_memory_pool::ThreadCache::allocate(size_t bytes)
 void cc_memory_pool::ThreadCache::deallocate(void* obj, size_t bytes)
 {
 	assert(obj != nullptr);
-	assert(bytes > 0);
+	assert(bytes >= 0);
 
 	// 根据对齐策略，选择对应的free链表
 	size_t idx = SizeClass::index(bytes);

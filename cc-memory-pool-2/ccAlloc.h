@@ -18,6 +18,8 @@ namespace cc_memory_pool
 				std::unique_lock<std::mutex> pageCacheLock(PageCache::getInstance()->getMutex());
 				kSpan = PageCache::getInstance()->newSpan(kPage);
 			}
+			//设置kSPan的对象大小（没有切分，所以整体就是一个内存对象）
+			kSpan->_objSize = align;
 			//将kSpan的页号转换为起始地址
 			void* addr = (void*)(kSpan->_pageID << PAGE_SHIFT);
 			 
@@ -32,8 +34,11 @@ namespace cc_memory_pool
 		return pTLSThreadCache->allocate(size);
 	}
 
-	void ccFree(void* obj, size_t size)
+	void ccFree(void* obj)
 	{
+		//获得obj的大小
+		size_t size = PageCache::getInstance()->mapObjToSpan(obj)->_objSize;
+
 		if (size > MAX_MEM_SIZE)
 		{
 			//找到obj所属的span

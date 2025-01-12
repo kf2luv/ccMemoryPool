@@ -364,5 +364,28 @@ Hints:
 
 
 
+### 使用对象池来创建span
 
+> 高并发内存池本身的目的是绕靠传统的`malloc`和`free`，更高效率地进行内存管理。而上面的`PageCache`中，却使用了`new`关键字来创建span对象，`new`底层就调用了`malloc`。因此，考虑用定长内存池（对象池ObjectPool）来完成span对象的创建和释放。
+
+```cpp
+class PageCache
+{
+public:
+    //...
+private:
+    //在PageCache中添加一个Span类的对象池
+    static ObjectPool<Span> spanPool;
+};
+
+//创建span对象
+Span* kSpan = spanPool.New();
+
+//释放span对象
+spanPool.Delete(span);
+```
+
+
+
+### 释放时不用指定大小
 

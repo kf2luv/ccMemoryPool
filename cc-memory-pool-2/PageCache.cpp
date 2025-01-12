@@ -1,6 +1,7 @@
 #include "PageCache.h"
 
 cc_memory_pool::PageCache cc_memory_pool::PageCache::_instance;
+ObjectPool<cc_memory_pool::Span> cc_memory_pool::PageCache::spanPool;
 
 cc_memory_pool::PageCache* cc_memory_pool::PageCache::getInstance()
 {
@@ -22,7 +23,8 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 		//直接向系统申请k页空间
 		void* addr = systemAlloc(k);
 
-		Span* kSpan = new Span;
+		//Span* kSpan = new Span;
+		Span* kSpan = spanPool.New();
 		kSpan->_npage = k;
 		kSpan->_pageID = (PageID)addr >> PAGE_SHIFT;
 
@@ -49,7 +51,7 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 				// 从头切k页下来，剩下的挂到对应映射的位置
 
 				Span* nSpan = _spanLists[i].popFront();//找到的大空间nSpan
-				Span* kSpan = new Span;//nSpan前k个页切出来的kSpan
+				Span* kSpan = spanPool.New();//nSpan前k个页切出来的kSpan
 
 				kSpan->_pageID = nSpan->_pageID;
 				kSpan->_npage = k;
@@ -83,7 +85,7 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 	void* addr = systemAlloc(NPAGELISTS);//返回128page空间的起始地址
 	assert(addr);
 
-	Span* bigSpan = new Span;
+	Span* bigSpan = spanPool.New();
 	//修改span的空间，页数和页号
 	bigSpan->_freeList = FreeList(addr);
 	bigSpan->_npage = NPAGELISTS;
@@ -93,27 +95,6 @@ cc_memory_pool::Span* cc_memory_pool::PageCache::newSpan(size_t k)
 	// 此时只是新增了大Span，还需要拆分后返回给用户，复用代码
 	return newSpan(k);
 }
-
-cc_memory_pool::Span* cc_memory_pool::PageCache::mapObjToSpan(void* obj)
-{
-	assert(obj);
-	// 1.计算obj对应的页号
-	PageID pageID = (PageID)obj >> PAGE_SHIFT;
-
-	// 2.通过映射，找到对应的Span
-	auto it = _idToSpanMap.find(pageID);
-	if (it != _idToSpanMap.end()) 
-	{
-		return it->second;
-	}
-	else 
-	{
-		//不可能发生，申请的内存计算出来的pageID一定存在
-		assert(false);
-		return nullptr;
-	}
-}
-
 
 void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 {
@@ -126,7 +107,8 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 		systemDealloc(addr, span->_npage);
 		//移除这个span
 		_idToSpanMap.erase(span->_pageID);
-		delete span;
+		//delete span;
+		spanPool.Delete(span);
 		return;
 	}
 
@@ -160,7 +142,8 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 				//将prevSpan从对应的 桶 中解开
 				_spanLists[prevSpan->_npage].erase(prevSpan);
 				//释放prevSpan
-				delete prevSpan;
+				//delete prevSpan;
+				spanPool.Delete(prevSpan);
 			}
 			else
 			{
@@ -182,7 +165,8 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 				//将nextSpan从对应的 桶 中解开
 				_spanLists[nextSpan->_npage].erase(nextSpan);
 				//释放nextSpan
-				delete nextSpan;
+				//delete nextSpan;
+				spanPool.Delete(nextSpan);
 			}
 			else
 			{
@@ -193,4 +177,27 @@ void cc_memory_pool::PageCache::releaseSpanToPageCache(Span* span)
 
 	//合并结束(也可能没有合并)，将span挂到对应的桶上
 	_spanLists[span->_npage].pushFront(span);
+}
+
+cc_memory_pool::Span* cc_memory_pool::PageCache::mapObjToSpan(void* obj)
+{
+	assert(obj);
+	// 1.计算obj对应的页号
+	PageID pageID = (PageID)obj >> PAGE_SHIFT;
+
+	//操作的_idToSpanMap属于PageCache，需要加锁
+	std::unique_lock<std::mutex> pageCacheLock(getMutex());
+
+	// 2.通过映射，找到对应的Span
+	auto it = _idToSpanMap.find(pageID);
+	if (it != _idToSpanMap.end())
+	{
+		return it->second;
+	}
+	else
+	{
+		//不可能发生，申请的内存计算出来的pageID一定存在
+		assert(false);
+		return nullptr;
+	}
 }
